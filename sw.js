@@ -1,0 +1,21 @@
+// 2A Prints Accounting — service worker. Makes the app installable and lets the shell open offline.
+// Data comes live from Supabase; when offline the app itself keeps a saved copy (IndexedDB). This caches the app's own files.
+const CACHE = "2a-accounting-shell-v2.3.1";
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png",
+  "./vendor/supabase-js-2.118.0.js", "./vendor/xlsx-0.18.5.full.min.js"];   // 2.1.8: libraries too, so the app opens offline
+self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
+self.addEventListener("activate", e => {
+  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+});
+self.addEventListener("fetch", e => {
+  const req = e.request, url = new URL(req.url);
+  if (req.method !== "GET" || url.origin !== location.origin) return;       // never touch Supabase / CDN calls
+  if (url.pathname.indexOf("/get/") !== -1) return;                          // the sales landing page lives at /get/ and is not part of the app
+  const isPage = req.mode === "navigate" || url.pathname.endsWith("/index.html");
+  if (isPage) {                                                              // network first so new versions arrive straight away
+    e.respondWith(fetch(req).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put("./index.html", copy)); return r; })
+      .catch(() => caches.match("./index.html")));
+    return;
+  }
+  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(req, copy)); return r; })));
+});
